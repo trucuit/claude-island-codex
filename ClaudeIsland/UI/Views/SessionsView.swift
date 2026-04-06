@@ -354,14 +354,14 @@ struct SessionRow: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 stateIndicator
 
-                VStack(alignment: .leading, spacing: 7) {
-                    HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 6) {
                         Text(session.displayTitle)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(TerminalColors.textPrimary)
                             .lineLimit(1)
 
@@ -381,7 +381,7 @@ struct SessionRow: View {
 
             providerActionLane
         }
-        .padding(14)
+        .padding(12)
         .contentShape(RoundedRectangle(cornerRadius: Radius.xl, style: .continuous))
         .onTapGesture(count: 2) {
             onChat()
@@ -474,38 +474,38 @@ struct SessionRow: View {
         ZStack {
             Circle()
                 .fill(phaseTint.opacity(0.14))
-                .frame(width: 34, height: 34)
+                .frame(width: 24, height: 24)
 
             Circle()
-                .stroke(phaseTint.opacity(0.28), lineWidth: 1)
-                .frame(width: 34, height: 34)
+                .stroke(phaseTint.opacity(0.28), lineWidth: 0.5)
+                .frame(width: 24, height: 24)
 
             switch session.phase {
             case .processing, .compacting:
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(phaseTint)
                     .symbolEffect(.pulse, options: .repeating)
 
             case .waitingForApproval:
                 Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(phaseTint)
                     .symbolEffect(.pulse, options: .repeating)
 
             case .waitingForInput:
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(phaseTint)
 
             case .idle:
                 Circle()
                     .fill(phaseTint.opacity(0.6))
-                    .frame(width: 6, height: 6)
+                    .frame(width: 5, height: 5)
 
             case .ended:
                 Image(systemName: "minus.circle")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundColor(phaseTint)
             }
         }
@@ -514,18 +514,18 @@ struct SessionRow: View {
     // MARK: - Badges
 
     private var statusBadge: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 3) {
             Circle()
                 .fill(phaseTint)
-                .frame(width: 6, height: 6)
+                .frame(width: 4, height: 4)
 
             Text(phaseLabel.uppercased())
                 .font(TypeStyle.badge)
-                .tracking(0.7)
+                .tracking(0.5)
         }
         .foregroundColor(phaseTint)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
         .background(
             Capsule(style: .continuous)
                 .fill(phaseTint.opacity(0.14))
@@ -548,10 +548,10 @@ struct SessionRow: View {
     private var sourceBadge: some View {
         Text(session.agent.rawValue.uppercased())
             .font(TypeStyle.badge)
-            .tracking(0.7)
+            .tracking(0.5)
             .foregroundColor(sourceTint.opacity(0.6))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
             .background(
                 Capsule(style: .continuous)
                     .fill(sourceTint.opacity(0.08))
