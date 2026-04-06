@@ -23,31 +23,95 @@ final class CodexSessionMonitor: ObservableObject {
         let cache: [String: CacheEntry]
     }
 
-    private var timerCancellable: AnyCancellable?
+    private var directorySource: DispatchSourceFileSystemObject?
+    private var directoryFD: Int32 = -1
+    private var fallbackTimer: AnyCancellable?
+    private let monitorQueue = DispatchQueue(label: "com.claudeisland.codex-monitor", qos: .utility)
+    private var debounceWorkItem: DispatchWorkItem?
+    private let debounceInterval: TimeInterval = 0.2
+
     private var refreshTask: Task<Void, Never>?
     private var cache: [String: CacheEntry] = [:]
 
     private let maxAge: TimeInterval = 6 * 60 * 60
-    private let refreshInterval: TimeInterval = 1.5
     private let maxSessions = 20
     private let staleProcessingTimeout: TimeInterval = 5 * 60
 
     func startMonitoring() {
         refresh()
-
-        timerCancellable?.cancel()
-        timerCancellable = Timer.publish(every: refreshInterval, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.refresh()
-            }
+        startDirectoryWatch()
     }
 
     func stopMonitoring() {
-        timerCancellable?.cancel()
-        timerCancellable = nil
+        directorySource?.cancel()
+        directorySource = nil
+        fallbackTimer?.cancel()
+        fallbackTimer = nil
+        debounceWorkItem?.cancel()
+        debounceWorkItem = nil
         refreshTask?.cancel()
         refreshTask = nil
+    }
+
+    private func startDirectoryWatch() {
+        let sessionsPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex/sessions").path
+
+        guard FileManager.default.fileExists(atPath: sessionsPath) else {
+            startFallbackPolling()
+            return
+        }
+
+        let fd = open(sessionsPath, O_EVTONLY)
+        guard fd >= 0 else {
+            startFallbackPolling()
+            return
+        }
+        directoryFD = fd
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd,
+            eventMask: .write,
+            queue: monitorQueue
+        )
+        source.setEventHandler { [weak self] in
+            self?.debouncedRefresh()
+        }
+        source.setCancelHandler { [weak self] in
+            guard let self else { return }
+            if self.directoryFD >= 0 {
+                close(self.directoryFD)
+                self.directoryFD = -1
+            }
+        }
+        source.resume()
+        directorySource = source
+    }
+
+    private func debouncedRefresh() {
+        debounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.refresh()
+            }
+        }
+        debounceWorkItem = work
+        monitorQueue.asyncAfter(deadline: .now() + debounceInterval, execute: work)
+    }
+
+    private func startFallbackPolling() {
+        fallbackTimer?.cancel()
+        fallbackTimer = Timer.publish(every: 5.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                let path = FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".codex/sessions").path
+                if FileManager.default.fileExists(atPath: path) {
+                    self?.fallbackTimer?.cancel()
+                    self?.fallbackTimer = nil
+                    self?.startDirectoryWatch()
+                }
+            }
     }
 
     private func refresh() {

@@ -456,14 +456,14 @@ struct NotchView: View {
                 }
             } label: {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: viewModel.contentType == .menu ? "xmark" : "line.3.horizontal")
+                    Image(systemName: viewModel.contentType == .menu || viewModel.contentType == .approvalRules ? "xmark" : "line.3.horizontal")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.white.opacity(0.4))
                         .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
 
                     // Green dot for unseen update
-                    if updateManager.hasUnseenUpdate && viewModel.contentType != .menu {
+                    if updateManager.hasUnseenUpdate && viewModel.contentType != .menu && viewModel.contentType != .approvalRules {
                         Circle()
                             .fill(TerminalColors.green)
                             .frame(width: 6, height: 6)
@@ -489,6 +489,8 @@ struct NotchView: View {
                 )
             case .menu:
                 NotchMenuView(viewModel: viewModel)
+            case .approvalRules:
+                ApprovalRulesView(viewModel: viewModel)
             case .chat(let session):
                 ChatView(
                     sessionId: session.sessionId,

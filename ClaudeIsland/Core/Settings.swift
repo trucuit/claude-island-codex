@@ -38,6 +38,16 @@ enum AppSettings {
 
     private enum Keys {
         static let notificationSound = "notificationSound"
+        static let autoApprovalRules = "autoApprovalRules"
+        static let autoApprovalEnabled = "autoApprovalEnabled"
+    }
+
+    // MARK: - Auto-Approval
+
+    /// Master on/off switch for auto-approval of tool permission requests
+    static var autoApprovalEnabled: Bool {
+        get { defaults.bool(forKey: Keys.autoApprovalEnabled) }
+        set { defaults.set(newValue, forKey: Keys.autoApprovalEnabled) }
     }
 
     // MARK: - Notification Sound

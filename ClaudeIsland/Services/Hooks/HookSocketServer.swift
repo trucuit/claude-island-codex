@@ -174,7 +174,7 @@ class HookSocketServer {
             return
         }
 
-        chmod(Self.socketPath, 0o777)
+        chmod(Self.socketPath, 0o700)
 
         guard listen(serverSocket, 10) == 0 else {
             logger.error("Failed to listen: \(errno)")
@@ -248,6 +248,32 @@ class HookSocketServer {
             return nil
         }
         return (pending.event.tool, pending.toolUseId, pending.event.toolInput)
+    }
+
+    /// Respond to multiple pending permission requests at once (batch approval/denial)
+    func respondToMultiplePermissions(toolUseIds: [String], decision: String, reason: String? = nil) {
+        queue.async { [weak self] in
+            for toolUseId in toolUseIds {
+                self?.sendPermissionResponse(toolUseId: toolUseId, decision: decision, reason: reason)
+            }
+        }
+    }
+
+    /// Get all pending permission requests for a session
+    func getPendingPermissions(sessionId: String) -> [(toolUseId: String, toolName: String?, toolInput: [String: AnyCodable]?)] {
+        permissionsLock.lock()
+        defer { permissionsLock.unlock() }
+        return pendingPermissions.values
+            .filter { $0.sessionId == sessionId }
+            .sorted { $0.receivedAt < $1.receivedAt }
+            .map { (toolUseId: $0.toolUseId, toolName: $0.event.tool, toolInput: $0.event.toolInput) }
+    }
+
+    /// Count pending permissions for a session
+    func pendingPermissionCount(sessionId: String) -> Int {
+        permissionsLock.lock()
+        defer { permissionsLock.unlock() }
+        return pendingPermissions.values.filter { $0.sessionId == sessionId }.count
     }
 
     /// Cancel a specific pending permission by toolUseId (when tool completes via terminal approval)
@@ -372,6 +398,7 @@ class HookSocketServer {
         _ = fcntl(clientSocket, F_SETFL, flags | O_NONBLOCK)
 
         var allData = Data()
+        let maxMessageSize = 1_048_576 // 1MB hard cap to prevent OOM
         var buffer = [UInt8](repeating: 0, count: 131072)
         var pollFd = pollfd(fd: clientSocket, events: Int16(POLLIN), revents: 0)
 
@@ -384,6 +411,11 @@ class HookSocketServer {
 
                 if bytesRead > 0 {
                     allData.append(contentsOf: buffer[0..<bytesRead])
+                    if allData.count > maxMessageSize {
+                        logger.warning("Message exceeded \(maxMessageSize) byte limit, dropping")
+                        close(clientSocket)
+                        return
+                    }
                 } else if bytesRead == 0 {
                     break
                 } else if errno != EAGAIN && errno != EWOULDBLOCK {
@@ -434,8 +466,6 @@ class HookSocketServer {
                 return
             }
 
-            logger.debug("Permission request - keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
-
             let updatedEvent = HookEvent(
                 sessionId: event.sessionId,
                 cwd: event.cwd,
@@ -445,10 +475,28 @@ class HookSocketServer {
                 tty: event.tty,
                 tool: event.tool,
                 toolInput: event.toolInput,
-                toolUseId: toolUseId,  // Use resolved toolUseId
+                toolUseId: toolUseId,
                 notificationType: event.notificationType,
                 message: event.message
             )
+
+            // Auto-approval check: if tool is in allowlist, respond immediately
+            if ApprovalRulesManager.shared.isAutoApproved(toolName: event.tool ?? "") {
+                logger.info("Auto-approved \(event.tool ?? "?", privacy: .public) for \(event.sessionId.prefix(8), privacy: .public)")
+                let response = HookResponse(decision: "allow", reason: "auto-approved")
+                if let responseData = try? JSONEncoder().encode(response) {
+                    responseData.withUnsafeBytes { bytes in
+                        if let base = bytes.baseAddress {
+                            _ = write(clientSocket, base, responseData.count)
+                        }
+                    }
+                }
+                close(clientSocket)
+                eventHandler?(updatedEvent)
+                return
+            }
+
+            logger.debug("Permission request - keeping socket open for \(event.sessionId.prefix(8), privacy: .public) tool:\(toolUseId.prefix(12), privacy: .public)")
 
             let pending = PendingPermission(
                 sessionId: event.sessionId,

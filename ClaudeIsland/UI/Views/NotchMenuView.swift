@@ -76,6 +76,10 @@ struct NotchMenuView: View {
                 }
             }
 
+            MenuRow(icon: "checkmark.shield", label: "Auto-Approval") {
+                viewModel.contentType = .approvalRules
+            }
+
             AccessibilityRow(isEnabled: AXIsProcessTrusted())
 
             Divider()

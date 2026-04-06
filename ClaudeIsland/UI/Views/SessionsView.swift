@@ -14,6 +14,9 @@ struct SessionsView: View {
     @ObservedObject var codexMonitor: CodexSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
 
+    @State private var searchText = ""
+    @State private var activeFilter: SessionFilter = .all
+
     var body: some View {
         if sortedInstances.isEmpty {
             emptyState
@@ -84,20 +87,47 @@ struct SessionsView: View {
         }
     }
 
+    private var filteredSessions: [SessionState] {
+        sortedInstances.filter { session in
+            activeFilter.matches(session) &&
+            (searchText.isEmpty ||
+             session.projectName.localizedCaseInsensitiveContains(searchText) ||
+             session.displayTitle.localizedCaseInsensitiveContains(searchText) ||
+             session.cwd.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
     private var instancesList: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 10) {
-                ForEach(sortedInstances) { session in
-                    SessionRow(
-                        session: session,
-                        onFocus: { focusSession(session) },
-                        onChat: { openChat(session) },
-                        onOpenLog: { openLog(session) },
-                        onArchive: { archiveSession(session) },
-                        onApprove: { approveSession(session) },
-                        onReject: { rejectSession(session) }
-                    )
-                    .id(session.stableId)
+                SessionSearchBar(searchText: $searchText, activeFilter: $activeFilter)
+                    .padding(.horizontal, 4)
+                    .padding(.top, 4)
+
+                if filteredSessions.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 24))
+                            .foregroundColor(.white.opacity(0.3))
+                        Text("No matching sessions")
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 24)
+                } else {
+                    ForEach(filteredSessions) { session in
+                        SessionRow(
+                            session: session,
+                            onFocus: { focusSession(session) },
+                            onChat: { openChat(session) },
+                            onOpenLog: { openLog(session) },
+                            onArchive: { archiveSession(session) },
+                            onApprove: { approveSession(session) },
+                            onReject: { rejectSession(session) }
+                        )
+                        .id(session.stableId)
+                    }
                 }
             }
             .padding(.horizontal, 4)
@@ -107,6 +137,11 @@ struct SessionsView: View {
     }
 
     private func focusSession(_ session: SessionState) {
+        if session.agent == .codex {
+            focusCodexApp()
+            return
+        }
+
         guard session.isInTmux else { return }
 
         Task {
@@ -125,6 +160,19 @@ struct SessionsView: View {
     private func openLog(_ session: SessionState) {
         if let logPath = session.logPath {
             NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
+        }
+    }
+
+    private func focusCodexApp() {
+        let bundleId = "com.openai.codex"
+
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+            app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+            return
+        }
+
+        if let codexURL = URL(string: "codex://") {
+            NSWorkspace.shared.open(codexURL)
         }
     }
 
@@ -173,6 +221,12 @@ struct SessionRow: View {
     private var isInteractiveTool: Bool {
         guard let toolName = session.pendingToolName else { return false }
         return toolName == "AskUserQuestion"
+    }
+
+    /// Number of tools simultaneously waiting for approval (from socket server)
+    private var batchPendingCount: Int {
+        guard isWaitingForApproval && session.agent == .claude else { return 0 }
+        return HookSocketServer.shared.pendingPermissionCount(sessionId: session.sessionId)
     }
 
     private var phaseLabel: String {
@@ -233,6 +287,10 @@ struct SessionRow: View {
 
                         sourceBadge
                         statusBadge
+
+                        if batchPendingCount > 1 {
+                            batchBadge(count: batchPendingCount)
+                        }
                     }
 
                     summaryText
@@ -311,6 +369,18 @@ struct SessionRow: View {
             Capsule(style: .continuous)
                 .fill(phaseTint.opacity(0.14))
         )
+    }
+
+    private func batchBadge(count: Int) -> some View {
+        Text("\(count)")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundColor(.black)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 4)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(TerminalColors.amber)
+            )
     }
 
     private var sourceBadge: some View {
@@ -415,11 +485,11 @@ struct SessionRow: View {
     private var codexActionLane: some View {
         HStack(spacing: 8) {
             if isWaitingForApproval {
-                actionChip(icon: "bubble.left", label: "Chat", isPrimary: true, action: onChat)
-                actionChip(icon: "doc.text.magnifyingglass", label: "Log", isPrimary: false, action: onOpenLog)
+                actionChip(icon: "scope", label: "Focus", isPrimary: true, action: onFocus)
+                actionChip(icon: "bubble.left", label: "Chat", isPrimary: false, action: onChat)
             } else {
-                actionChip(icon: "bubble.left", label: "Chat", isPrimary: true, action: onChat)
-                actionChip(icon: "doc.text", label: "Log", isPrimary: false, action: onOpenLog)
+                actionChip(icon: "scope", label: "Focus", isPrimary: true, action: onFocus)
+                actionChip(icon: "bubble.left", label: "Chat", isPrimary: false, action: onChat)
             }
         }
     }

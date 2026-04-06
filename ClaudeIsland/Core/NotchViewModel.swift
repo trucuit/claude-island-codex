@@ -26,12 +26,14 @@ enum NotchOpenReason {
 enum NotchContentType: Equatable {
     case instances
     case menu
+    case approvalRules
     case chat(SessionState)
 
     var id: String {
         switch self {
         case .instances: return "instances"
         case .menu: return "menu"
+        case .approvalRules: return "approvalRules"
         case .chat(let session): return "chat-\(session.sessionId)"
         }
     }
@@ -75,6 +77,12 @@ class NotchViewModel: ObservableObject {
             return CGSize(
                 width: min(screenRect.width * 0.29, 340),
                 height: 290 + screenSelector.expandedPickerHeight + soundSelector.expandedPickerHeight
+            )
+        case .approvalRules:
+            // Tall enough for all tool toggles + add-custom row
+            return CGSize(
+                width: min(screenRect.width * 0.29, 340),
+                height: 420
             )
         case .instances:
             return CGSize(
@@ -282,6 +290,18 @@ class NotchViewModel: ObservableObject {
     func exitChat() {
         currentChatSession = nil
         contentType = .instances
+    }
+
+    // MARK: - Batch Approval Helpers
+
+    /// Count of pending tool approvals for a given session
+    func pendingApprovalCount(for sessionId: String) -> Int {
+        HookSocketServer.shared.pendingPermissionCount(sessionId: sessionId)
+    }
+
+    /// All pending tool use IDs and names for a given session
+    func pendingTools(for sessionId: String) -> [(toolUseId: String, toolName: String?, toolInput: [String: AnyCodable]?)] {
+        HookSocketServer.shared.getPendingPermissions(sessionId: sessionId)
     }
 
     /// Perform boot animation: expand briefly then collapse
