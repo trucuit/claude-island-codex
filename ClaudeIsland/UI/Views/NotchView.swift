@@ -11,8 +11,8 @@ import SwiftUI
 
 // Corner radius constants
 private let cornerRadiusInsets = (
-    opened: (top: CGFloat(19), bottom: CGFloat(24)),
-    closed: (top: CGFloat(6), bottom: CGFloat(14))
+    opened: (top: CGFloat(14), bottom: CGFloat(18)),
+    closed: (top: CGFloat(5), bottom: CGFloat(10))
 )
 
 struct NotchView: View {
@@ -59,21 +59,21 @@ struct NotchView: View {
 
     private var closedNotchSize: CGSize {
         CGSize(
-            width: viewModel.deviceNotchRect.width,
-            height: viewModel.deviceNotchRect.height
+            width: max(118, viewModel.deviceNotchRect.width * 0.72),
+            height: max(18, viewModel.deviceNotchRect.height * 0.64)
         )
     }
 
     /// Extra width for expanding activities (like Dynamic Island)
     private var expansionWidth: CGFloat {
         // Permission indicator adds width on left side only
-        let permissionIndicatorWidth: CGFloat = hasPendingPermission ? 18 : 0
+        let permissionIndicatorWidth: CGFloat = hasPendingPermission ? 12 : 0
 
         // Expand for processing activity
         if activityCoordinator.expandingActivity.show {
             switch activityCoordinator.expandingActivity.type {
             case .claude:
-                let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 20
+                let baseWidth = 2 * max(0, closedNotchSize.height - 12) + 4
                 return baseWidth + permissionIndicatorWidth
             case .none:
                 break
@@ -82,12 +82,12 @@ struct NotchView: View {
 
         // Expand for pending permissions (left indicator) or waiting for input (checkmark on right)
         if hasPendingPermission {
-            return 2 * max(0, closedNotchSize.height - 12) + 20 + permissionIndicatorWidth
+            return 2 * max(0, closedNotchSize.height - 12) + 4 + permissionIndicatorWidth
         }
 
         // Waiting for input just shows checkmark on right, no extra left indicator
         if hasWaitingForInput {
-            return 2 * max(0, closedNotchSize.height - 12) + 20
+            return 2 * max(0, closedNotchSize.height - 12) + 4
         }
 
         return 0
@@ -113,14 +113,14 @@ struct NotchView: View {
 
     private var shellOuterWidth: CGFloat {
         let horizontalInsets = viewModel.status == .opened
-            ? (cornerRadiusInsets.opened.top * 2) + 24
+            ? (cornerRadiusInsets.opened.top * 2) + 8
             : cornerRadiusInsets.closed.bottom * 2
 
         return shellContentWidth + horizontalInsets
     }
 
     private var shellOuterHeight: CGFloat {
-        viewModel.status == .opened ? notchSize.height + 12 : closedNotchSize.height
+        viewModel.status == .opened ? notchSize.height + 4 : closedNotchSize.height
     }
 
     // MARK: - Corner Radii
@@ -162,18 +162,18 @@ struct NotchView: View {
                             ? cornerRadiusInsets.opened.top
                             : cornerRadiusInsets.closed.bottom
                     )
-                    .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
+                    .padding([.horizontal, .bottom], viewModel.status == .opened ? 4 : 0)
                     .background(shellBackground)
                     .clipShape(currentNotchShape)
                     .overlay(shellStrokeOverlay)
                     .shadow(
                         color: .black.opacity(viewModel.status == .opened ? 0.52 : 0.34),
-                        radius: viewModel.status == .opened ? 26 : 16,
-                        y: viewModel.status == .opened ? 16 : 8
+                        radius: viewModel.status == .opened ? 14 : 10,
+                        y: viewModel.status == .opened ? 8 : 5
                     )
                     .shadow(
                         color: TerminalColors.shellCool.opacity(viewModel.status == .opened || isHovering ? 0.18 : 0.08),
-                        radius: viewModel.status == .opened ? 18 : 10,
+                        radius: viewModel.status == .opened ? 10 : 6,
                         y: 0
                     )
                     .shadow(
@@ -252,12 +252,12 @@ struct NotchView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row - always present, contains crab and spinner that persist across states
             headerRow
-                .frame(height: max(24, closedNotchSize.height))
+                .frame(height: max(18, closedNotchSize.height))
 
             // Main content only when opened
             if viewModel.status == .opened {
                 contentView
-                    .frame(width: notchSize.width - 24) // Fixed width to prevent reflow
+                    .frame(width: notchSize.width - 18) // Fixed width to prevent reflow
                     .transition(
                         .asymmetric(
                             insertion: .scale(scale: 0.8, anchor: .top)
@@ -276,19 +276,19 @@ struct NotchView: View {
     private var headerRow: some View {
         HStack(spacing: 0) {
             // Left side - crab + optional permission indicator (visible when processing, pending, or waiting for input)
-            if showClosedActivity {
-                HStack(spacing: 4) {
-                    ClaudeCrabIcon(size: 14, animateLegs: isProcessing)
+                if showClosedActivity {
+                    HStack(spacing: 4) {
+                    ClaudeCrabIcon(size: 10, animateLegs: isProcessing)
                         .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: showClosedActivity)
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 14, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                        PermissionIndicatorIcon(size: 10, color: Color(red: 0.85, green: 0.47, blue: 0.34))
                             .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
                     }
                 }
-                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 18 : 0))
-                .padding(.leading, viewModel.status == .opened ? 8 : 0)
+                .frame(width: viewModel.status == .opened ? nil : sideWidth + (hasPendingPermission ? 12 : 0))
+                .padding(.leading, viewModel.status == .opened ? 4 : 0)
             }
 
             // Center content
@@ -305,7 +305,7 @@ struct NotchView: View {
                         startPoint: .top,
                         endPoint: .bottom
                     ))
-                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
+                    .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 8 : 0))
             }
 
             // Right side - spinner when processing/pending, checkmark when waiting for input
@@ -313,12 +313,12 @@ struct NotchView: View {
                 if isProcessing || hasPendingPermission {
                     ProcessingSpinner()
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                        .frame(width: viewModel.status == .opened ? 16 : sideWidth)
                 } else if hasWaitingForInput {
                     // Checkmark for waiting-for-input on the right side
-                    ReadyForInputIndicatorIcon(size: 14, color: TerminalColors.green)
+                    ReadyForInputIndicatorIcon(size: 10, color: TerminalColors.green)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
-                        .frame(width: viewModel.status == .opened ? 20 : sideWidth)
+                        .frame(width: viewModel.status == .opened ? 16 : sideWidth)
                 }
             }
         }
@@ -326,7 +326,7 @@ struct NotchView: View {
     }
 
     private var sideWidth: CGFloat {
-        max(0, closedNotchSize.height - 12) + 10
+        max(0, closedNotchSize.height - 12) + 4
     }
 
     private var shellBackground: some View {
@@ -439,7 +439,7 @@ struct NotchView: View {
             // Show static crab only if not showing activity in headerRow
             // (headerRow handles crab + indicator when showClosedActivity is true)
             if !showClosedActivity {
-                ClaudeCrabIcon(size: 14)
+                ClaudeCrabIcon(size: 12)
                     .matchedGeometryEffect(id: "crab", in: activityNamespace, isSource: !showClosedActivity)
                     .padding(.leading, 8)
             }
@@ -459,7 +459,7 @@ struct NotchView: View {
                     Image(systemName: viewModel.contentType == .menu ? "xmark" : "line.3.horizontal")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.white.opacity(0.4))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
 
                     // Green dot for unseen update
@@ -482,7 +482,7 @@ struct NotchView: View {
         Group {
             switch viewModel.contentType {
             case .instances:
-                ClaudeInstancesView(
+                SessionsView(
                     sessionMonitor: sessionMonitor,
                     codexMonitor: codexMonitor,
                     viewModel: viewModel
@@ -493,7 +493,8 @@ struct NotchView: View {
                 ChatView(
                     sessionId: session.sessionId,
                     initialSession: session,
-                    sessionMonitor: sessionMonitor,
+                    claudeMonitor: sessionMonitor,
+                    codexMonitor: codexMonitor,
                     viewModel: viewModel
                 )
             }

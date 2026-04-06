@@ -30,6 +30,7 @@ final class CodexSessionMonitor: ObservableObject {
     private let maxAge: TimeInterval = 6 * 60 * 60
     private let refreshInterval: TimeInterval = 1.5
     private let maxSessions = 20
+    private let staleProcessingTimeout: TimeInterval = 5 * 60
 
     func startMonitoring() {
         refresh()
@@ -55,12 +56,14 @@ final class CodexSessionMonitor: ObservableObject {
         let existingCache = cache
         let maxAge = maxAge
         let maxSessions = maxSessions
+        let staleProcessingTimeout = staleProcessingTimeout
 
         refreshTask = Task.detached(priority: .utility) {
             let result = Self.scanSessions(
                 existingCache: existingCache,
                 maxAge: maxAge,
-                maxSessions: maxSessions
+                maxSessions: maxSessions,
+                staleProcessingTimeout: staleProcessingTimeout
             )
 
             await MainActor.run {
@@ -74,7 +77,8 @@ final class CodexSessionMonitor: ObservableObject {
     nonisolated private static func scanSessions(
         existingCache: [String: CacheEntry],
         maxAge: TimeInterval,
-        maxSessions: Int
+        maxSessions: Int,
+        staleProcessingTimeout: TimeInterval
     ) -> RefreshResult {
         let baseURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex/sessions")
@@ -122,7 +126,11 @@ final class CodexSessionMonitor: ObservableObject {
                 continue
             }
 
-            let parsed = parseSession(at: candidate.url, formatter: formatter)
+            let parsed = parseSession(
+                at: candidate.url,
+                formatter: formatter,
+                staleProcessingTimeout: staleProcessingTimeout
+            )
             let entry = CacheEntry(modificationTime: modTime, session: parsed)
             nextCache[path] = entry
 
@@ -148,7 +156,16 @@ final class CodexSessionMonitor: ObservableObject {
         let timestamp: Date
     }
 
-    nonisolated private static func parseSession(at url: URL, formatter: ISO8601DateFormatter) -> SessionState? {
+    private struct ToolCallDraft {
+        let index: Int
+        let name: String
+    }
+
+    nonisolated private static func parseSession(
+        at url: URL,
+        formatter: ISO8601DateFormatter,
+        staleProcessingTimeout: TimeInterval
+    ) -> SessionState? {
         guard let data = try? Data(contentsOf: url),
               let content = String(data: data, encoding: .utf8) else {
             return nil
@@ -167,6 +184,8 @@ final class CodexSessionMonitor: ObservableObject {
         var latestTaskStart: Date?
         var latestTaskComplete: Date?
         var pendingApprovals: [String: PendingApproval] = [:]
+        var chatItems: [ChatHistoryItem] = []
+        var toolDrafts: [String: ToolCallDraft] = [:]
         var isSubagent = false
 
         for line in content.split(separator: "\n") {
@@ -220,6 +239,14 @@ final class CodexSessionMonitor: ObservableObject {
                         if firstUserMessage == nil {
                             firstUserMessage = truncate(message, maxLength: 60)
                         }
+
+                        chatItems.append(
+                            ChatHistoryItem(
+                                id: "user-\(timestamp?.timeIntervalSince1970 ?? 0)-\(chatItems.count)",
+                                type: .user(message),
+                                timestamp: timestamp ?? Date()
+                            )
+                        )
                     }
                 case "agent_message":
                     if let message = payload["message"] as? String,
@@ -242,6 +269,24 @@ final class CodexSessionMonitor: ObservableObject {
 
                     let arguments = decodeArguments(payload["arguments"] as? String)
                     let requiresEscalation = (arguments["sandbox_permissions"] as? String) == "require_escalated"
+                    let inputMap = stringifyArguments(arguments)
+
+                    let toolStatus: ToolStatus = requiresEscalation ? .waitingForApproval : .running
+                    chatItems.append(
+                        ChatHistoryItem(
+                            id: callId,
+                            type: .toolCall(ToolCallItem(
+                                name: name,
+                                input: inputMap,
+                                status: toolStatus,
+                                result: nil,
+                                structuredResult: nil,
+                                subagentTools: []
+                            )),
+                            timestamp: timestamp ?? Date()
+                        )
+                    )
+                    toolDrafts[callId] = ToolCallDraft(index: chatItems.count - 1, name: name)
 
                     if requiresEscalation {
                         let command = (arguments["cmd"] as? String) ?? (arguments["command"] as? String)
@@ -267,6 +312,16 @@ final class CodexSessionMonitor: ObservableObject {
                 case "function_call_output":
                     if let callId = payload["call_id"] as? String {
                         pendingApprovals.removeValue(forKey: callId)
+                        if let draft = toolDrafts[callId],
+                           case .toolCall(var tool) = chatItems[draft.index].type {
+                            tool.status = .success
+                            tool.result = payload["output"] as? String
+                            chatItems[draft.index] = ChatHistoryItem(
+                                id: chatItems[draft.index].id,
+                                type: .toolCall(tool),
+                                timestamp: chatItems[draft.index].timestamp
+                            )
+                        }
                     }
 
                 case "message":
@@ -275,6 +330,50 @@ final class CodexSessionMonitor: ObservableObject {
                        let content = payload["content"] as? [[String: Any]],
                        let text = content.compactMap({ $0["text"] as? String }).joined(separator: "\n").nilIfEmpty {
                         latestAssistantMessage = truncate(text, maxLength: 140)
+                        chatItems.append(
+                            ChatHistoryItem(
+                                id: "assistant-\(timestamp?.timeIntervalSince1970 ?? 0)-\(chatItems.count)",
+                                type: .assistant(text),
+                                timestamp: timestamp ?? Date()
+                            )
+                        )
+                    }
+
+                case "custom_tool_call":
+                    guard let callId = payload["call_id"] as? String,
+                          let name = payload["name"] as? String else {
+                        break
+                    }
+
+                    let rawInput = payload["input"]
+                    let inputMap = stringifyCustomInput(rawInput)
+                    chatItems.append(
+                        ChatHistoryItem(
+                            id: callId,
+                            type: .toolCall(ToolCallItem(
+                                name: name,
+                                input: inputMap,
+                                status: .running,
+                                result: nil,
+                                structuredResult: nil,
+                                subagentTools: []
+                            )),
+                            timestamp: timestamp ?? Date()
+                        )
+                    )
+                    toolDrafts[callId] = ToolCallDraft(index: chatItems.count - 1, name: name)
+
+                case "custom_tool_call_output":
+                    guard let callId = payload["call_id"] as? String else { break }
+                    if let draft = toolDrafts[callId],
+                       case .toolCall(var tool) = chatItems[draft.index].type {
+                        tool.status = .success
+                        tool.result = payload["output"] as? String
+                        chatItems[draft.index] = ChatHistoryItem(
+                            id: chatItems[draft.index].id,
+                            type: .toolCall(tool),
+                            timestamp: chatItems[draft.index].timestamp
+                        )
                     }
 
                 default:
@@ -298,6 +397,7 @@ final class CodexSessionMonitor: ObservableObject {
         }
 
         let phase: SessionPhase
+        let isStale = Date().timeIntervalSince(lastActivity) > staleProcessingTimeout
         if let pending = pendingApprovals.values.sorted(by: { $0.timestamp > $1.timestamp }).first {
             phase = .waitingForApproval(PermissionContext(
                 toolUseId: pending.callId,
@@ -305,8 +405,10 @@ final class CodexSessionMonitor: ObservableObject {
                 toolInput: pending.input,
                 receivedAt: pending.timestamp
             ))
-        } else if let latestTaskStart, latestTaskStart > (latestTaskComplete ?? .distantPast) {
+        } else if let latestTaskStart, latestTaskStart > (latestTaskComplete ?? .distantPast), !isStale {
             phase = .processing
+        } else if latestTaskComplete == nil, isStale {
+            phase = .idle
         } else if latestTaskComplete != nil {
             phase = .waitingForInput
         } else {
@@ -329,6 +431,7 @@ final class CodexSessionMonitor: ObservableObject {
             projectName: URL(fileURLWithPath: cwd).lastPathComponent,
             logPath: url.path,
             phase: phase,
+            chatItems: chatItems,
             conversationInfo: conversationInfo,
             lastActivity: lastActivity,
             createdAt: createdAt
@@ -355,6 +458,42 @@ final class CodexSessionMonitor: ObservableObject {
 
         guard cleaned.count > maxLength else { return cleaned }
         return String(cleaned.prefix(maxLength - 3)) + "..."
+    }
+
+    nonisolated private static func stringifyArguments(_ arguments: [String: Any]) -> [String: String] {
+        var output: [String: String] = [:]
+
+        for (key, value) in arguments {
+            switch value {
+            case let string as String:
+                output[key] = string
+            case let int as Int:
+                output[key] = String(int)
+            case let double as Double:
+                output[key] = String(double)
+            case let bool as Bool:
+                output[key] = bool ? "true" : "false"
+            default:
+                if let data = try? JSONSerialization.data(withJSONObject: value),
+                   let string = String(data: data, encoding: .utf8) {
+                    output[key] = string
+                }
+            }
+        }
+
+        return output
+    }
+
+    nonisolated private static func stringifyCustomInput(_ rawInput: Any?) -> [String: String] {
+        if let dictionary = rawInput as? [String: Any] {
+            return stringifyArguments(dictionary)
+        }
+
+        if let string = rawInput as? String {
+            return ["input": string]
+        }
+
+        return [:]
     }
 }
 

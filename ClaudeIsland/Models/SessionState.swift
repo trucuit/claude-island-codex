@@ -196,7 +196,7 @@ struct SessionState: Equatable, Identifiable, Sendable {
     }
 
     var supportsChatHistory: Bool {
-        agent == .claude
+        agent == .claude || agent == .codex
     }
 
     var supportsRemoteApproval: Bool {

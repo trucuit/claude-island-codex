@@ -1,5 +1,5 @@
 //
-//  ClaudeInstancesView.swift
+//  SessionsView.swift
 //  ClaudeIsland
 //
 //  Session list with richer hierarchy and better control affordances
@@ -9,7 +9,7 @@ import Combine
 import AppKit
 import SwiftUI
 
-struct ClaudeInstancesView: View {
+struct SessionsView: View {
     @ObservedObject var sessionMonitor: ClaudeSessionMonitor
     @ObservedObject var codexMonitor: CodexSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
@@ -88,10 +88,11 @@ struct ClaudeInstancesView: View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: 10) {
                 ForEach(sortedInstances) { session in
-                    InstanceRow(
+                    SessionRow(
                         session: session,
                         onFocus: { focusSession(session) },
                         onChat: { openChat(session) },
+                        onOpenLog: { openLog(session) },
                         onArchive: { archiveSession(session) },
                         onApprove: { approveSession(session) },
                         onReject: { rejectSession(session) }
@@ -118,9 +119,11 @@ struct ClaudeInstancesView: View {
     }
 
     private func openChat(_ session: SessionState) {
-        if session.supportsChatHistory {
-            viewModel.showChat(for: session)
-        } else if let logPath = session.logPath {
+        viewModel.showChat(for: session)
+    }
+
+    private func openLog(_ session: SessionState) {
+        if let logPath = session.logPath {
             NSWorkspace.shared.open(URL(fileURLWithPath: logPath))
         }
     }
@@ -147,10 +150,11 @@ struct ClaudeInstancesView: View {
     }
 }
 
-struct InstanceRow: View {
+struct SessionRow: View {
     let session: SessionState
     let onFocus: () -> Void
     let onChat: () -> Void
+    let onOpenLog: () -> Void
     let onArchive: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
@@ -237,7 +241,7 @@ struct InstanceRow: View {
                 Spacer(minLength: 8)
             }
 
-            actionRow
+            providerActionLane
         }
         .padding(14)
         .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -396,16 +400,33 @@ struct InstanceRow: View {
     }
 
     @ViewBuilder
-    private var actionRow: some View {
-        if session.agent == .codex && isWaitingForApproval {
-            HStack(spacing: 8) {
-                actionChip(icon: "doc.text.magnifyingglass", label: "Review Log", isPrimary: true, action: onChat)
+    private var providerActionLane: some View {
+        Group {
+            switch session.agent {
+            case .claude:
+                claudeActionLane
+            case .codex:
+                codexActionLane
             }
-        } else if session.agent == .codex {
-            HStack(spacing: 8) {
-                actionChip(icon: "doc.text", label: "Open Log", isPrimary: true, action: onChat)
+        }
+    }
+
+    @ViewBuilder
+    private var codexActionLane: some View {
+        HStack(spacing: 8) {
+            if isWaitingForApproval {
+                actionChip(icon: "bubble.left", label: "Chat", isPrimary: true, action: onChat)
+                actionChip(icon: "doc.text.magnifyingglass", label: "Log", isPrimary: false, action: onOpenLog)
+            } else {
+                actionChip(icon: "bubble.left", label: "Chat", isPrimary: true, action: onChat)
+                actionChip(icon: "doc.text", label: "Log", isPrimary: false, action: onOpenLog)
             }
-        } else if isWaitingForApproval && isInteractiveTool {
+        }
+    }
+
+    @ViewBuilder
+    private var claudeActionLane: some View {
+        if isWaitingForApproval && isInteractiveTool {
             HStack(spacing: 8) {
                 actionChip(icon: "bubble.left", label: "Open Chat", isPrimary: false, action: onChat)
 

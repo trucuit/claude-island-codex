@@ -11,7 +11,8 @@ import SwiftUI
 struct ChatView: View {
     let sessionId: String
     let initialSession: SessionState
-    let sessionMonitor: ClaudeSessionMonitor
+    let claudeMonitor: ClaudeSessionMonitor
+    let codexMonitor: CodexSessionMonitor
     @ObservedObject var viewModel: NotchViewModel
 
     @State private var inputText: String = ""
@@ -26,16 +27,30 @@ struct ChatView: View {
     @State private var isBottomVisible: Bool = true
     @FocusState private var isInputFocused: Bool
 
-    init(sessionId: String, initialSession: SessionState, sessionMonitor: ClaudeSessionMonitor, viewModel: NotchViewModel) {
+    init(
+        sessionId: String,
+        initialSession: SessionState,
+        claudeMonitor: ClaudeSessionMonitor,
+        codexMonitor: CodexSessionMonitor,
+        viewModel: NotchViewModel
+    ) {
         self.sessionId = sessionId
         self.initialSession = initialSession
-        self.sessionMonitor = sessionMonitor
+        self.claudeMonitor = claudeMonitor
+        self.codexMonitor = codexMonitor
         self._viewModel = ObservedObject(wrappedValue: viewModel)
         self._session = State(initialValue: initialSession)
 
         // Initialize from cache if available (prevents loading flicker on view recreation)
-        let cachedHistory = ChatHistoryManager.shared.history(for: sessionId)
-        let alreadyLoaded = !cachedHistory.isEmpty
+        let cachedHistory: [ChatHistoryItem]
+        let alreadyLoaded: Bool
+        if initialSession.agent == .claude {
+            cachedHistory = ChatHistoryManager.shared.history(for: sessionId)
+            alreadyLoaded = !cachedHistory.isEmpty
+        } else {
+            cachedHistory = initialSession.chatItems
+            alreadyLoaded = true
+        }
         self._history = State(initialValue: cachedHistory)
         self._isLoading = State(initialValue: !alreadyLoaded)
         self._hasLoadedOnce = State(initialValue: alreadyLoaded)
@@ -96,6 +111,12 @@ struct ChatView: View {
             guard !hasLoadedOnce else { return }
             hasLoadedOnce = true
 
+            if session.agent == .codex {
+                history = session.chatItems
+                isLoading = false
+                return
+            }
+
             // Check if already loaded (from previous visit)
             if ChatHistoryManager.shared.isLoaded(sessionId: sessionId) {
                 history = ChatHistoryManager.shared.history(for: sessionId)
@@ -112,6 +133,7 @@ struct ChatView: View {
             }
         }
         .onReceive(ChatHistoryManager.shared.$histories) { histories in
+            guard session.agent == .claude else { return }
             // Update when count changes, last item differs, or content changes (e.g., tool status)
             if let newHistory = histories[sessionId] {
                 let countChanged = newHistory.count != history.count
@@ -143,7 +165,8 @@ struct ChatView: View {
                 viewModel.exitChat()
             }
         }
-        .onReceive(sessionMonitor.$instances) { sessions in
+        .onReceive(claudeMonitor.$instances) { sessions in
+            guard session.agent == .claude else { return }
             if let updated = sessions.first(where: { $0.sessionId == sessionId }),
                updated != session {
                 // Check if permission was just accepted (transition from waitingForApproval to processing)
@@ -156,6 +179,20 @@ struct ChatView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         shouldScrollToBottom = true
                     }
+                }
+            }
+        }
+        .onReceive(codexMonitor.$instances) { sessions in
+            guard session.agent == .codex else { return }
+            if let updated = sessions.first(where: { $0.sessionId == sessionId }),
+               updated != session {
+                session = updated
+                history = updated.chatItems
+                if !isAutoscrollPaused {
+                    shouldScrollToBottom = true
+                }
+                if isLoading {
+                    isLoading = false
                 }
             }
         }
@@ -355,12 +392,20 @@ struct ChatView: View {
 
     /// Can send messages only if session is in tmux
     private var canSendMessages: Bool {
-        session.isInTmux && session.tty != nil
+        guard session.agent == .claude else { return false }
+        return session.isInTmux && session.tty != nil
+    }
+
+    private var inputPlaceholder: String {
+        if session.agent == .codex {
+            return "Codex transcript is read-only in this prototype"
+        }
+        return canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging"
     }
 
     private var inputBar: some View {
         HStack(spacing: 10) {
-            TextField(canSendMessages ? "Message Claude..." : "Open Claude Code in tmux to enable messaging", text: $inputText)
+            TextField(inputPlaceholder, text: $inputText)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .foregroundColor(canSendMessages ? .white : .white.opacity(0.4))
@@ -455,11 +500,11 @@ struct ChatView: View {
     }
 
     private func approvePermission() {
-        sessionMonitor.approvePermission(sessionId: sessionId)
+        claudeMonitor.approvePermission(sessionId: sessionId)
     }
 
     private func denyPermission() {
-        sessionMonitor.denyPermission(sessionId: sessionId, reason: nil)
+        claudeMonitor.denyPermission(sessionId: sessionId, reason: nil)
     }
 
     private func sendMessage() {
