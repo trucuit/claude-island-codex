@@ -27,6 +27,11 @@ struct NotchView: View {
     @State private var isVisible: Bool = false
     @State private var isHovering: Bool = false
     @State private var isBouncing: Bool = false
+    @State private var crabBreathOpacity: Double = 0.5
+    @State private var approvalPulseOpacity: Double = 0.12
+    @State private var readyFlashOpacity: Double = 0
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Namespace private var activityNamespace
 
@@ -166,6 +171,8 @@ struct NotchView: View {
                     .background(shellBackground)
                     .clipShape(currentNotchShape)
                     .overlay(shellStrokeOverlay)
+                    .overlay(approvalPulseOverlay)
+                    .overlay(readyFlashOverlay)
                     .shadow(
                         color: .black.opacity(viewModel.status == .opened ? 0.52 : 0.34),
                         radius: viewModel.status == .opened ? 14 : 10,
@@ -226,6 +233,56 @@ struct NotchView: View {
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
+        .onChange(of: hasPendingPermission) { _, isPending in
+            handleApprovalStateChange(isPending)
+        }
+        .onChange(of: hasWaitingForInput) { _, isReady in
+            if isReady { triggerReadyFlash() }
+        }
+    }
+
+    // MARK: - Shell Overlays
+
+    /// Warm amber pulsing glow overlay shown during approval-needed state.
+    @ViewBuilder
+    private var approvalPulseOverlay: some View {
+        if hasPendingPermission && !reduceMotion {
+            currentNotchShape
+                .fill(TerminalColors.statusWarning.opacity(approvalPulseOpacity))
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Brief green edge flash shown when a session enters waitingForInput.
+    @ViewBuilder
+    private var readyFlashOverlay: some View {
+        if readyFlashOpacity > 0 {
+            currentNotchShape
+                .stroke(TerminalColors.statusSuccess.opacity(readyFlashOpacity), lineWidth: 1.5)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private func handleApprovalStateChange(_ isPending: Bool) {
+        guard !reduceMotion else { return }
+        if isPending {
+            approvalPulseOpacity = 0.12
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                approvalPulseOpacity = 0.35
+            }
+        } else {
+            withAnimation(.easeOut(duration: 0.3)) {
+                approvalPulseOpacity = 0
+            }
+        }
+    }
+
+    private func triggerReadyFlash() {
+        guard !reduceMotion else { return }
+        readyFlashOpacity = 0.4
+        withAnimation(.easeOut(duration: 0.6)) {
+            readyFlashOpacity = 0
+        }
     }
 
     // MARK: - Notch Layout
@@ -283,7 +340,9 @@ struct NotchView: View {
 
                     // Permission indicator only (amber) - waiting for input shows checkmark on right
                     if hasPendingPermission {
-                        PermissionIndicatorIcon(size: 10, color: Color(red: 0.85, green: 0.47, blue: 0.34))
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(TerminalColors.statusWarning)
                             .matchedGeometryEffect(id: "status-indicator", in: activityNamespace, isSource: showClosedActivity)
                     }
                 }
@@ -298,13 +357,8 @@ struct NotchView: View {
             } else if !showClosedActivity {
                 idleClosedCenter
             } else {
-                // Closed with activity: shell spacer (with optional bounce)
-                Rectangle()
-                    .fill(LinearGradient(
-                        colors: [TerminalColors.shellTop.opacity(0.9), TerminalColors.shellBottom.opacity(0.96)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
+                // Closed with activity: transparent spacer (shell background shows through)
+                Color.clear
                     .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 8 : 0))
             }
 
@@ -316,7 +370,9 @@ struct NotchView: View {
                         .frame(width: viewModel.status == .opened ? 16 : sideWidth)
                 } else if hasWaitingForInput {
                     // Checkmark for waiting-for-input on the right side
-                    ReadyForInputIndicatorIcon(size: 10, color: TerminalColors.green)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(TerminalColors.statusSuccess)
                         .matchedGeometryEffect(id: "spinner", in: activityNamespace, isSource: showClosedActivity)
                         .frame(width: viewModel.status == .opened ? 16 : sideWidth)
                 }
@@ -414,21 +470,17 @@ struct NotchView: View {
     }
 
     private var idleClosedCenter: some View {
-        HStack(spacing: 6) {
-            Capsule(style: .continuous)
-                .fill(TerminalColors.shellCool.opacity(isHovering ? 0.85 : 0.55))
-                .frame(width: 18, height: 3)
-
-            Capsule(style: .continuous)
-                .fill(.white.opacity(isHovering ? 0.8 : 0.55))
-                .frame(width: 26, height: 3)
-
-            Capsule(style: .continuous)
-                .fill(TerminalColors.shellWarm.opacity(isHovering ? 0.85 : 0.55))
-                .frame(width: 18, height: 3)
-        }
-        .frame(width: closedNotchSize.width - 28)
-        .opacity(viewModel.status == .opened ? 0 : 1)
+        ClaudeCrabIcon(size: 10, animateLegs: false)
+            .opacity(isHovering ? 0.9 : crabBreathOpacity)
+            .scaleEffect(isHovering ? 1.08 : 1.0)
+            .frame(width: closedNotchSize.width - 28)
+            .opacity(viewModel.status == .opened ? 0 : 1)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 3).repeatForever(autoreverses: true)) {
+                    crabBreathOpacity = 0.7
+                }
+            }
     }
 
     // MARK: - Opened Header Content

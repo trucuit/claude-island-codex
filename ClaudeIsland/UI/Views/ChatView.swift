@@ -218,6 +218,39 @@ struct ChatView: View {
 
     @State private var isHeaderHovered = false
 
+    /// Subtle tint color reflecting the current session phase.
+    private var phaseTintForSession: Color {
+        switch session.phase {
+        case .processing:           return TerminalColors.brandWarm
+        case .compacting:           return TerminalColors.brandWarm
+        case .waitingForApproval:   return TerminalColors.statusWarning
+        case .waitingForInput:      return TerminalColors.statusSuccess
+        case .idle:                 return TerminalColors.brandCool
+        case .ended:                return TerminalColors.textTertiary
+        }
+    }
+
+    /// Inline phase pill displayed in the header alongside the session title.
+    private var phasePill: some View {
+        let label: String
+        let tint: Color
+        switch session.phase {
+        case .processing:           label = "Processing"; tint = TerminalColors.brandWarm
+        case .compacting:           label = "Compacting"; tint = TerminalColors.brandWarm
+        case .waitingForApproval:   label = "Approval";  tint = TerminalColors.statusWarning
+        case .waitingForInput:      label = "Ready";     tint = TerminalColors.statusSuccess
+        case .idle:                 label = "Idle";      tint = TerminalColors.textTertiary
+        case .ended:                label = "Ended";     tint = TerminalColors.textTertiary
+        }
+        return Text(label.uppercased())
+            .font(TypeStyle.badge)
+            .tracking(0.5)
+            .foregroundColor(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Capsule(style: .continuous).fill(tint.opacity(0.12)))
+    }
+
     private var chatHeader: some View {
         Button {
             viewModel.exitChat()
@@ -225,13 +258,18 @@ struct ChatView: View {
             HStack(spacing: 8) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.6))
+                    .foregroundColor(isHeaderHovered ? TerminalColors.textPrimary : TerminalColors.textSecondary)
                     .frame(width: 24, height: 24)
 
                 Text(session.displayTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white.opacity(isHeaderHovered ? 1.0 : 0.85))
+                    .font(TypeStyle.displayMedium)
+                    .foregroundColor(isHeaderHovered ? TerminalColors.textPrimary : .white.opacity(0.85))
                     .lineLimit(1)
+
+                // Phase pill — only for Claude sessions
+                if session.agent == .claude {
+                    phasePill
+                }
 
                 if session.agent == .codex {
                     codexReadOnlyBadge
@@ -243,18 +281,25 @@ struct ChatView: View {
                     codexHeaderButton
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
             .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isHeaderHovered ? Color.white.opacity(0.08) : Color.clear)
+                RoundedRectangle(cornerRadius: Radius.md)
+                    .fill(isHeaderHovered ? TerminalColors.interactiveHover : Color.clear)
             )
         }
         .buttonStyle(.plain)
         .onHover { isHeaderHovered = $0 }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color.black.opacity(0.2))
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.xs)
+        .background(.ultraThinMaterial)
+        .background(
+            LinearGradient(
+                colors: [phaseTintForSession.opacity(0.06), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
         .overlay(alignment: .bottom) {
             LinearGradient(
                 colors: [fadeColor.opacity(0.7), fadeColor.opacity(0)],
