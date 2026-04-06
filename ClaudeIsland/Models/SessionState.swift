@@ -8,14 +8,21 @@
 
 import Foundation
 
+enum SessionAgent: String, Equatable, Sendable {
+    case claude
+    case codex
+}
+
 /// Complete state for a single Claude session
 /// This is the single source of truth - all state reads and writes go through SessionStore
 struct SessionState: Equatable, Identifiable, Sendable {
     // MARK: - Identity
 
+    let agent: SessionAgent
     let sessionId: String
     let cwd: String
     let projectName: String
+    var logPath: String?
 
     // MARK: - Instance Metadata
 
@@ -65,9 +72,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
     // MARK: - Initialization
 
     nonisolated init(
+        agent: SessionAgent = .claude,
         sessionId: String,
         cwd: String,
         projectName: String? = nil,
+        logPath: String? = nil,
         pid: Int? = nil,
         tty: String? = nil,
         isInTmux: Bool = false,
@@ -83,9 +92,11 @@ struct SessionState: Equatable, Identifiable, Sendable {
         lastActivity: Date = Date(),
         createdAt: Date = Date()
     ) {
+        self.agent = agent
         self.sessionId = sessionId
         self.cwd = cwd
         self.projectName = projectName ?? URL(fileURLWithPath: cwd).lastPathComponent
+        self.logPath = logPath
         self.pid = pid
         self.tty = tty
         self.isInTmux = isInTmux
@@ -182,6 +193,14 @@ struct SessionState: Equatable, Identifiable, Sendable {
     /// Whether the session can be interacted with
     var canInteract: Bool {
         phase.needsAttention
+    }
+
+    var supportsChatHistory: Bool {
+        agent == .claude
+    }
+
+    var supportsRemoteApproval: Bool {
+        agent == .claude
     }
 }
 

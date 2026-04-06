@@ -37,6 +37,8 @@ class NotchViewController: NSViewController {
 
     override func loadView() {
         hostingView = PassThroughHostingView(rootView: NotchView(viewModel: viewModel))
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.clear.cgColor
 
         // Calculate the hit-test rect based on panel state
         hostingView.hitTestRect = { [weak self] in

@@ -18,6 +18,7 @@ private let cornerRadiusInsets = (
 struct NotchView: View {
     @ObservedObject var viewModel: NotchViewModel
     @StateObject private var sessionMonitor = ClaudeSessionMonitor()
+    @StateObject private var codexMonitor = CodexSessionMonitor()
     @StateObject private var activityCoordinator = NotchActivityCoordinator.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var previousPendingIds: Set<String> = []
@@ -31,12 +32,12 @@ struct NotchView: View {
 
     /// Whether any Claude session is currently processing or compacting
     private var isAnyProcessing: Bool {
-        sessionMonitor.instances.contains { $0.phase == .processing || $0.phase == .compacting }
+        allInstances.contains { $0.phase == .processing || $0.phase == .compacting }
     }
 
     /// Whether any Claude session has a pending permission request
     private var hasPendingPermission: Bool {
-        sessionMonitor.instances.contains { $0.phase.isWaitingForApproval }
+        allInstances.contains { $0.phase.isWaitingForApproval }
     }
 
     /// Whether any Claude session is waiting for user input (done/ready state) within the display window
@@ -44,7 +45,7 @@ struct NotchView: View {
         let now = Date()
         let displayDuration: TimeInterval = 30  // Show checkmark for 30 seconds
 
-        return sessionMonitor.instances.contains { session in
+        return allInstances.contains { session in
             guard session.phase == .waitingForInput else { return false }
             // Only show if within the 30-second display window
             if let enteredAt = waitingForInputTimestamps[session.stableId] {
@@ -106,6 +107,22 @@ struct NotchView: View {
         closedNotchSize.width + expansionWidth
     }
 
+    private var shellContentWidth: CGFloat {
+        viewModel.status == .opened ? notchSize.width : closedContentWidth
+    }
+
+    private var shellOuterWidth: CGFloat {
+        let horizontalInsets = viewModel.status == .opened
+            ? (cornerRadiusInsets.opened.top * 2) + 24
+            : cornerRadiusInsets.closed.bottom * 2
+
+        return shellContentWidth + horizontalInsets
+    }
+
+    private var shellOuterHeight: CGFloat {
+        viewModel.status == .opened ? notchSize.height + 12 : closedNotchSize.height
+    }
+
     // MARK: - Corner Radii
 
     private var topCornerRadius: CGFloat {
@@ -138,10 +155,7 @@ struct NotchView: View {
             // Outer container does NOT receive hits - only the notch content does
             VStack(spacing: 0) {
                 notchLayout
-                    .frame(
-                        maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        alignment: .top
-                    )
+                    .frame(width: shellContentWidth, alignment: .top)
                     .padding(
                         .horizontal,
                         viewModel.status == .opened
@@ -149,21 +163,27 @@ struct NotchView: View {
                             : cornerRadiusInsets.closed.bottom
                     )
                     .padding([.horizontal, .bottom], viewModel.status == .opened ? 12 : 0)
-                    .background(.black)
+                    .background(shellBackground)
                     .clipShape(currentNotchShape)
-                    .overlay(alignment: .top) {
-                        Rectangle()
-                            .fill(.black)
-                            .frame(height: 1)
-                            .padding(.horizontal, topCornerRadius)
-                    }
+                    .overlay(shellStrokeOverlay)
                     .shadow(
-                        color: (viewModel.status == .opened || isHovering) ? .black.opacity(0.7) : .clear,
-                        radius: 6
+                        color: .black.opacity(viewModel.status == .opened ? 0.52 : 0.34),
+                        radius: viewModel.status == .opened ? 26 : 16,
+                        y: viewModel.status == .opened ? 16 : 8
+                    )
+                    .shadow(
+                        color: TerminalColors.shellCool.opacity(viewModel.status == .opened || isHovering ? 0.18 : 0.08),
+                        radius: viewModel.status == .opened ? 18 : 10,
+                        y: 0
+                    )
+                    .shadow(
+                        color: TerminalColors.shellWarm.opacity(hasPendingPermission ? 0.18 : 0.08),
+                        radius: 20,
+                        y: 2
                     )
                     .frame(
-                        maxWidth: viewModel.status == .opened ? notchSize.width : nil,
-                        maxHeight: viewModel.status == .opened ? notchSize.height : nil,
+                        width: shellOuterWidth,
+                        height: shellOuterHeight,
                         alignment: .top
                     )
                     .animation(viewModel.status == .opened ? openAnimation : closeAnimation, value: viewModel.status)
@@ -190,6 +210,7 @@ struct NotchView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             sessionMonitor.startMonitoring()
+            codexMonitor.startMonitoring()
             // On non-notched devices, keep visible so users have a target to interact with
             if !viewModel.hasPhysicalNotch {
                 isVisible = true
@@ -198,10 +219,10 @@ struct NotchView: View {
         .onChange(of: viewModel.status) { oldStatus, newStatus in
             handleStatusChange(from: oldStatus, to: newStatus)
         }
-        .onChange(of: sessionMonitor.pendingInstances) { _, sessions in
+        .onChange(of: allPendingInstances) { _, sessions in
             handlePendingSessionsChange(sessions)
         }
-        .onChange(of: sessionMonitor.instances) { _, instances in
+        .onChange(of: allInstances) { _, instances in
             handleProcessingChange()
             handleWaitingForInputChange(instances)
         }
@@ -216,6 +237,14 @@ struct NotchView: View {
     /// Whether to show the expanded closed state (processing, pending permission, or waiting for input)
     private var showClosedActivity: Bool {
         isProcessing || hasPendingPermission || hasWaitingForInput
+    }
+
+    private var allInstances: [SessionState] {
+        sessionMonitor.instances + codexMonitor.instances
+    }
+
+    private var allPendingInstances: [SessionState] {
+        allInstances.filter(\.needsAttention)
     }
 
     @ViewBuilder
@@ -267,14 +296,15 @@ struct NotchView: View {
                 // Opened: show header content
                 openedHeaderContent
             } else if !showClosedActivity {
-                // Closed without activity: empty space
-                Rectangle()
-                    .fill(.clear)
-                    .frame(width: closedNotchSize.width - 20)
+                idleClosedCenter
             } else {
-                // Closed with activity: black spacer (with optional bounce)
+                // Closed with activity: shell spacer (with optional bounce)
                 Rectangle()
-                    .fill(.black)
+                    .fill(LinearGradient(
+                        colors: [TerminalColors.shellTop.opacity(0.9), TerminalColors.shellBottom.opacity(0.96)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ))
                     .frame(width: closedNotchSize.width - cornerRadiusInsets.closed.top + (isBouncing ? 16 : 0))
             }
 
@@ -297,6 +327,108 @@ struct NotchView: View {
 
     private var sideWidth: CGFloat {
         max(0, closedNotchSize.height - 12) + 10
+    }
+
+    private var shellBackground: some View {
+        ZStack {
+            LinearGradient(
+                colors: [TerminalColors.shellTop, TerminalColors.shellBottom],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            LinearGradient(
+                colors: [
+                    TerminalColors.shellCool.opacity(viewModel.status == .opened ? 0.28 : 0.14),
+                    .clear,
+                    TerminalColors.shellWarm.opacity(hasPendingPermission ? 0.28 : 0.14)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+
+            RadialGradient(
+                colors: [TerminalColors.shellHighlight.opacity(0.22), .clear],
+                center: .top,
+                startRadius: 4,
+                endRadius: max(44, notchSize.width * 0.42)
+            )
+            .blendMode(.screen)
+
+            LinearGradient(
+                colors: [
+                    .white.opacity(viewModel.status == .opened ? 0.08 : 0.04),
+                    .clear,
+                    .clear,
+                    .black.opacity(0.12)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            Rectangle()
+                .fill(.white.opacity(viewModel.status == .opened ? 0.035 : 0.02))
+                .blur(radius: viewModel.status == .opened ? 12 : 6)
+                .mask(alignment: .top) {
+                    LinearGradient(
+                        colors: [.white, .clear],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+        }
+    }
+
+    private var shellStrokeOverlay: some View {
+        currentNotchShape
+            .stroke(
+                LinearGradient(
+                    colors: [
+                        TerminalColors.shellStrokeStrong,
+                        TerminalColors.shellStroke,
+                        TerminalColors.shellStroke
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
+            .overlay(alignment: .top) {
+                Capsule(style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                TerminalColors.shellCool.opacity(0.45),
+                                .white.opacity(0.55),
+                                TerminalColors.shellWarm.opacity(0.45)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 1)
+                    .blur(radius: 0.3)
+                    .padding(.horizontal, topCornerRadius + 10)
+                    .padding(.top, 0.5)
+            }
+    }
+
+    private var idleClosedCenter: some View {
+        HStack(spacing: 6) {
+            Capsule(style: .continuous)
+                .fill(TerminalColors.shellCool.opacity(isHovering ? 0.85 : 0.55))
+                .frame(width: 18, height: 3)
+
+            Capsule(style: .continuous)
+                .fill(.white.opacity(isHovering ? 0.8 : 0.55))
+                .frame(width: 26, height: 3)
+
+            Capsule(style: .continuous)
+                .fill(TerminalColors.shellWarm.opacity(isHovering ? 0.85 : 0.55))
+                .frame(width: 18, height: 3)
+        }
+        .frame(width: closedNotchSize.width - 28)
+        .opacity(viewModel.status == .opened ? 0 : 1)
     }
 
     // MARK: - Opened Header Content
@@ -352,6 +484,7 @@ struct NotchView: View {
             case .instances:
                 ClaudeInstancesView(
                     sessionMonitor: sessionMonitor,
+                    codexMonitor: codexMonitor,
                     viewModel: viewModel
                 )
             case .menu:
