@@ -474,38 +474,38 @@ struct SessionRow: View {
         ZStack {
             Circle()
                 .fill(phaseTint.opacity(0.14))
-                .frame(width: 24, height: 24)
+                .frame(width: 18, height: 18)
 
             Circle()
                 .stroke(phaseTint.opacity(0.28), lineWidth: 0.5)
-                .frame(width: 24, height: 24)
+                .frame(width: 18, height: 18)
 
             switch session.phase {
             case .processing, .compacting:
                 Image(systemName: "bolt.fill")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 8, weight: .semibold))
                     .foregroundColor(phaseTint)
                     .symbolEffect(.pulse, options: .repeating)
 
             case .waitingForApproval:
                 Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(phaseTint)
                     .symbolEffect(.pulse, options: .repeating)
 
             case .waitingForInput:
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                     .foregroundColor(phaseTint)
 
             case .idle:
                 Circle()
                     .fill(phaseTint.opacity(0.6))
-                    .frame(width: 5, height: 5)
+                    .frame(width: 4, height: 4)
 
             case .ended:
                 Image(systemName: "minus.circle")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 8, weight: .medium))
                     .foregroundColor(phaseTint)
             }
         }
@@ -691,15 +691,15 @@ struct SessionRow: View {
 
     private func actionChip(icon: String, label: String, isPrimary: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 9, weight: .semibold))
                 Text(label)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
             }
             .foregroundColor(isPrimary ? .black : TerminalColors.textSecondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
                     .fill(
@@ -739,10 +739,10 @@ struct InlineApprovalButtons: View {
             // Deny: understated
             Button(action: onReject) {
                 Text("Deny")
-                    .font(TypeStyle.labelMedium)
+                    .font(TypeStyle.labelSmall)
                     .foregroundColor(TerminalColors.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(
                         Capsule(style: .continuous)
                             .fill(TerminalColors.interactiveRest)
@@ -754,15 +754,15 @@ struct InlineApprovalButtons: View {
 
             // Allow: green gradient + glow — visually dominant
             Button(action: onApprove) {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.system(size: 8, weight: .bold))
                     Text("Allow")
-                        .font(TypeStyle.labelMedium)
+                        .font(TypeStyle.labelSmall)
                 }
                 .foregroundColor(.black)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
                 .background(
                     Capsule(style: .continuous)
                         .fill(

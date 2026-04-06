@@ -86,8 +86,8 @@ class NotchViewModel: ObservableObject {
             )
         case .instances:
             return CGSize(
-                width: min(screenRect.width * 0.29, 340),
-                height: 220
+                width: min(screenRect.width * 0.38, 480),
+                height: 380
             )
         }
     }
